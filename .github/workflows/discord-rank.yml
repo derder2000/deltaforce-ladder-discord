@@ -3,14 +3,20 @@
 #
 # 需要的設定 / Required settings — 專案 Settings → Secrets and variables → Actions：
 #   Secrets（加密）:  DISCORD_WEBHOOK_URL, PLAYER
-#   Variables:        LANGUAGE（選填，預設 zh-TW）, DISCORD_MESSAGE_ID（第一次手動執行後填）
+#   Variables:        LANGUAGE（選填，預設 zh-TW）, DISCORD_MESSAGE_ID（第一次建立訊息後填）
+# 新專案的 GitHub 排程常常不會準時跑，建議用 cron-job.org 觸發（見 README）
 # 沒設定 DISCORD_WEBHOOK_URL 的話會自動跳過（例如別人 fork 的專案）
 name: Discord rank
 
 on:
   schedule:
     - cron: '*/5 * * * *'   # 每 5 分鐘（GitHub 尖峰時段可能延遲）/ every 5 min (GitHub may delay it)
-  workflow_dispatch:         # 可以在 Actions 頁面手動執行 / allow manual runs
+  workflow_dispatch:         # 手動執行，或由 cron-job.org 觸發 / manual runs, or triggered by cron-job.org
+    inputs:
+      create_message:
+        description: '發一則新的排名訊息（只有第一次設定、或訊息被刪掉時才勾）/ Post a new rank message (first setup, or if it was deleted)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,3 +41,4 @@ jobs:
           PLAYER: ${{ secrets.PLAYER }}
           LANGUAGE: ${{ vars.LANGUAGE }}
           DISCORD_MESSAGE_ID: ${{ vars.DISCORD_MESSAGE_ID }}
+          CREATE_MESSAGE: ${{ inputs.create_message }}
