@@ -1,0 +1,37 @@
+# 定時把排名更新到 Discord 頻道（編輯同一則訊息，不洗版）
+# Periodically updates the rank in a Discord channel (edits one message, no spam)
+#
+# 需要的設定 / Required settings — 專案 Settings → Secrets and variables → Actions：
+#   Secrets（加密）:  DISCORD_WEBHOOK_URL, PLAYER
+#   Variables:        LANGUAGE（選填，預設 zh-TW）, DISCORD_MESSAGE_ID（第一次手動執行後填）
+# 沒設定 DISCORD_WEBHOOK_URL 的話會自動跳過（例如別人 fork 的專案）
+name: Discord rank
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # 每 5 分鐘（GitHub 尖峰時段可能延遲）/ every 5 min (GitHub may delay it)
+  workflow_dispatch:         # 可以在 Actions 頁面手動執行 / allow manual runs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-rank
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Update Discord message
+        run: node update.mjs
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PLAYER: ${{ secrets.PLAYER }}
+          LANGUAGE: ${{ vars.LANGUAGE }}
+          DISCORD_MESSAGE_ID: ${{ vars.DISCORD_MESSAGE_ID }}
