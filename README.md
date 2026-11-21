@@ -22,7 +22,9 @@ about every 5 minutes, so your computer doesn't need to be on.
 ### Features
 
 - Edits one message in place. No spam
-- Same 16 languages as the overlay. Translations are read straight from the overlay project, so both always match
+- Same 16 languages as the overlay
+- **One place to maintain**: translations, region names and the ranking API settings are all read straight from the
+  overlay project's `overlay.html`. Update the overlay and this updater follows automatically on its next run
 - ▲ / ▼ shows the most recent rank change
 - Shows each viewer's local time for "last updated"
 - Runs on GitHub Actions for free. No server and no computer left on
@@ -58,6 +60,8 @@ From now on the message updates itself about every 5 minutes (GitHub may delay r
 - **No spam**: scheduled runs never post a new message. Only a manual run creates one, and only when no message ID is set.
 - **Temporary problems**: if the official server or the translation file doesn't respond, the message is left as it is
   and the next run tries again. These count as warnings, not failures, so GitHub won't email you every 5 minutes.
+- **Failure emails?** If `overlay.html` in the overlay project changes in a way this updater can't read, runs fail and
+  GitHub emails you, because it won't fix itself. The channel message is left untouched until it's fixed.
 - **Deleted the message?** Run the workflow manually once, then replace `DISCORD_MESSAGE_ID` with the new ID.
 - **Inactive repositories**: GitHub pauses scheduled workflows in public repositories after 60 days without any commits.
   The ladder ends on January 10, 2027, so this normally doesn't matter.
@@ -99,7 +103,9 @@ and break this tool. Please don't make it run more often than every 5 minutes.
 ### 功能
 
 - 只編輯同一則訊息，不洗版
-- 跟 overlay 一樣支援 16 種語言，翻譯直接讀 overlay 專案裡的檔案，兩邊永遠一致
+- 跟 overlay 一樣支援 16 種語言
+- **只要維護一個地方**：翻譯、地區名稱、排名 API 的網址和參數，全部直接讀 overlay 專案的 `overlay.html`。
+  更新 overlay 之後，這邊下一次執行就會自動跟上
 - ▲ / ▼ 顯示最近一次的名次變動
 - 「最後更新時間」會自動用每個人自己的時區顯示
 - 用 GitHub Actions 免費執行，不需要伺服器，電腦也不用開著
@@ -134,6 +140,8 @@ and break this tool. Please don't make it run more often than every 5 minutes.
 - **不會洗版**：定時執行永遠不會發新訊息，只有手動執行、而且還沒設定訊息 ID 時才會建立一則。
 - **暫時性問題**：官方伺服器或翻譯檔沒回應時，頻道訊息會維持原樣，下次自動再試。
   這種情況只算警告、不算失敗，GitHub 不會每 5 分鐘寄信給你。
+- **收到失敗通知信？** 代表 overlay 專案的 `overlay.html` 改成了這支程式讀不懂的格式。這種問題不會自己好，
+  所以會算失敗並寄信通知你；修好之前，頻道訊息會維持原樣。
 - **訊息被刪掉了？** 手動執行一次，再把 `DISCORD_MESSAGE_ID` 換成新的 ID。
 - **專案太久沒動**：公開專案超過 60 天沒有任何 commit，GitHub 會暫停定時執行。
   天梯賽在 2027 年 1 月 10 日結束，通常不會遇到。

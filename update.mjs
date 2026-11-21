@@ -12,6 +12,9 @@
 //    LANGUAGE             選填，預設 zh-TW（跟 overlay 一樣的 16 種語言）/ optional, default zh-TW
 //    DISCORD_MESSAGE_ID   選填，要編輯的訊息 ID；第一次執行會自動建立並印出 / optional
 //
+//  翻譯、地區名稱、排名 API 的網址和參數，全部直接讀 overlay 專案的 overlay.html，只要維護那一份
+//  Translations, region names and the ranking API settings all come from the overlay repo's overlay.html
+//
 //  需要 Node.js 18 以上，不需要安裝任何套件 / Requires Node.js 18+, no dependencies
 // =====================================================================
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -29,13 +32,8 @@ const ID_FILE = join(HERE, '.message-id');
 // 翻譯直接讀 OBS overlay 專案裡的 overlay.html，兩邊永遠同一份 / translations come from the overlay repo
 const OVERLAY_SOURCE = ENV.OVERLAY_SOURCE || 'https://raw.githubusercontent.com/derder2000/deltaforce-ladder-overlay/main/overlay.html';
 
-// 官方排名介面（跟 overlay.html 相同）/ same endpoint as overlay.html
-const API = ENV.LADDER_API_URL || 'https://sg-apps.vasdgame.com/ide/';
-const BODY = new URLSearchParams({
-  iChartId: '100017209', sIdeToken: 'IKJtRZ', instanceid: '4012871',
-  method: 'streamer.rank', from_source: '2',
-  param: JSON.stringify({ loginType: 0, streamerType: 0, seasonId: 'default' }),
-}).toString();
+// 官方排名介面的網址和參數也是從 overlay.html 讀，官方改了只要改 overlay.html 一個地方
+// The ranking endpoint and its parameters are also read from overlay.html, so there is only one place to update.
 const EVENT_URL = 'https://www.playdeltaforce.com/act/streamerladderS2/index.html';
 
 // 注意：公開專案的 Actions 紀錄任何人都看得到，所以這裡只印「狀態」，不印暱稱、名次或分數
@@ -47,8 +45,11 @@ const log = (...a) => console.log('[discord-rank]', ...a);
 function fail(msg) { log('✗', msg); process.exitCode = 1; }
 function warn(msg) { IN_ACTIONS ? console.log(`::warning::${msg}`) : log('⚠', msg); }
 
-// ---------- 從 overlay 專案的 overlay.html 讀翻譯 / reuse overlay.html translations ----------
-async function loadTranslations() {
+// 格式錯誤（不會自己好，需要人去修）跟連線錯誤（下次就好了）分開處理
+class FormatError extends Error {}
+
+// ---------- 從 overlay 專案的 overlay.html 讀翻譯和 API 設定 / read translations + API settings from overlay.html ----------
+async function loadOverlay() {
   let src;
   if (/^https?:/.test(OVERLAY_SOURCE)) {
     const ctrl = new AbortController();
@@ -61,9 +62,10 @@ async function loadTranslations() {
   } else {
     src = readFileSync(OVERLAY_SOURCE, 'utf8');   // 也可以指定本機的 overlay.html 路徑 / or a local path
   }
-  const grab = (name) => {
-    const start = src.indexOf(`const ${name} = {`);
-    if (start < 0) throw new Error(`overlay.html 裡找不到 ${name}`);
+  // marker 後面第一個 { 開始，找到對應的 } 為止，當成資料讀出來
+  const grab = (marker) => {
+    const start = src.indexOf(marker);
+    if (start < 0) throw new FormatError(`overlay.html 裡找不到「${marker}」，格式可能改了`);
     const open = src.indexOf('{', start);
     let depth = 0, i = open, q = null;
     for (; i < src.length; i++) {             // 找到對應的右大括號（略過字串內容）
@@ -74,9 +76,24 @@ async function loadTranslations() {
       else if (c === '}' && --depth === 0) break;
     }
     // 這是本專案自己的 overlay.html（純文字表格），只當資料讀取
-    return new Function(`return (${src.slice(open, i + 1)});`)();
+    try { return new Function(`return (${src.slice(open, i + 1)});`)(); }
+    catch (e) { throw new FormatError(`overlay.html 裡的「${marker}」讀不懂：${e.message}`); }
   };
-  return { I18N: grab('I18N'), REGION_NAMES: grab('REGION_NAMES') };
+  const I18N = grab('const I18N = {');
+  const REGION_NAMES = grab('const REGION_NAMES = {');
+  const params = grab('const BODY = new URLSearchParams({');
+  const apiUrl = (src.match(/const API = ['"](https:\/\/[^'"]+)['"]/) || [])[1];
+  // 檢查一下讀到的東西是不是完整，不完整就不要拿去打官方伺服器
+  for (const k of ['iChartId', 'sIdeToken', 'instanceid', 'method', 'param']) {
+    if (typeof params[k] !== 'string' || !params[k]) throw new FormatError(`overlay.html 裡的排名參數缺少 ${k}`);
+  }
+  if (!apiUrl) throw new FormatError('overlay.html 裡找不到排名 API 網址');
+  if (!I18N.en || !REGION_NAMES.en) throw new FormatError('overlay.html 裡的翻譯不完整');
+  return {
+    I18N, REGION_NAMES,
+    api: ENV.LADDER_API_URL || apiUrl,                 // LADDER_API_URL 只在測試時使用 / test-only override
+    body: new URLSearchParams(params).toString(),
+  };
 }
 
 function resolveLang(pref, I18N) {
@@ -88,12 +105,12 @@ function resolveLang(pref, I18N) {
 }
 
 // ---------- 官方排名 / ladder ----------
-async function fetchLadder() {
+async function fetchLadder({ api, body }) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
-    const res = await fetch(API, {
-      method: 'POST', body: BODY, signal: ctrl.signal,
+    const res = await fetch(api, {
+      method: 'POST', body, signal: ctrl.signal,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'deltaforce-ladder-overlay (discord updater)' },
     });
     if (!res.ok) throw new Error('排名伺服器回應 HTTP ' + res.status);
@@ -200,9 +217,14 @@ async function main() {
   if (!PLAYER) return fail('沒有設定 PLAYER（要追蹤的實況主）。/ PLAYER is not set.');
 
   const hook = webhookParts(WEBHOOK);
-  let I18N, REGION_NAMES;
-  try { ({ I18N, REGION_NAMES } = await loadTranslations()); }
-  catch (e) { return warn('讀不到 overlay 的翻譯檔，頻道訊息維持原樣，下次再試：' + (e.name === 'AbortError' ? '連線逾時' : e.message)); }
+  let overlay;
+  try { overlay = await loadOverlay(); }
+  catch (e) {
+    // 格式錯誤 → 失敗（GitHub 會寄信通知你去修）；連線問題 → 警告（下次自動再試）
+    if (e instanceof FormatError) return fail('overlay.html 的格式跟這支程式對不上，頻道訊息維持原樣，需要更新程式：' + e.message);
+    return warn('讀不到 overlay.html，頻道訊息維持原樣，下次再試：' + (e.name === 'AbortError' ? '連線逾時' : e.message));
+  }
+  const { I18N, REGION_NAMES } = overlay;
   const LANG = resolveLang(LANG_PREF, I18N);
 
   let messageId = (ENV.DISCORD_MESSAGE_ID || '').trim();
@@ -225,7 +247,7 @@ async function main() {
   }
 
   let ladder;
-  try { ladder = await fetchLadder(); }
+  try { ladder = await fetchLadder(overlay); }
   catch (e) {
     // 官方伺服器沒回應：保留頻道裡原本的訊息，不覆蓋，下次再試
     return warn('抓不到官方排名，頻道訊息維持原樣，下次再試：' + (e.name === 'AbortError' ? '連線逾時' : e.message));
