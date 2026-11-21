@@ -10,8 +10,8 @@ Keeps **one message** in a Discord channel that always shows a streamer's curren
 **Delta Force Streamer Ladder S2**: rank, regional rank, rating, the point gap to the players above and below,
 kills, matches, and extracted value. It's the same content as the OBS overlay.
 
-It edits the same message every time, so the channel never gets spammed. GitHub Actions runs it for free
-about every 5 minutes, so your computer doesn't need to be on.
+It edits the same message every time, so the channel never gets spammed. It runs for free on GitHub Actions,
+triggered every 5 minutes by [cron-job.org](https://cron-job.org), so your computer doesn't need to be on.
 
 > Looking for the OBS / Streamlabs overlay? → [deltaforce-ladder-overlay](https://github.com/derder2000/deltaforce-ladder-overlay)
 
@@ -27,7 +27,7 @@ about every 5 minutes, so your computer doesn't need to be on.
   overlay project's `overlay.html`. Update the overlay and this updater follows automatically on its next run
 - ▲ / ▼ shows the most recent rank change
 - Shows each viewer's local time for "last updated"
-- Runs on GitHub Actions for free. No server and no computer left on
+- Runs for free on GitHub Actions + cron-job.org. No server and no computer left on
 
 ### Setup
 
@@ -38,11 +38,37 @@ about every 5 minutes, so your computer doesn't need to be on.
 3. **Add the settings**: your repository → **Settings** → **Secrets and variables** → **Actions**
    - **Secrets** tab → **New repository secret**: `DISCORD_WEBHOOK_URL` (the URL you copied) and `PLAYER` (the streamer's nickname)
    - **Variables** tab (optional): `LANGUAGE`, e.g. `en` (default `zh-TW`)
-4. **Create the message**: **Actions** tab → **Discord rank** → **Run workflow**. When it finishes, open the run's
-   log and copy the message ID it prints.
+4. **Create the message**: **Actions** tab → **Discord rank** → **Run workflow** → tick
+   **Post a new rank message** → **Run workflow**. When it finishes, open the run's log and copy the message ID it prints.
 5. **Save the message ID**: **Variables** tab → **New repository variable** → `DISCORD_MESSAGE_ID` = the ID you copied.
+6. **Trigger it every 5 minutes** (see below). The workflow also has a GitHub schedule, but on new repositories
+   GitHub often runs it very late or not at all, so an external trigger is the reliable way.
 
-From now on the message updates itself about every 5 minutes (GitHub may delay runs at busy times).
+#### Trigger every 5 minutes with cron-job.org
+
+**a. Create a minimal GitHub token.** Your avatar → **Settings** → **Developer settings** → **Personal access tokens**
+→ **Fine-grained tokens** → **Generate new token**:
+- **Expiration**: shortly after the ladder ends (e.g. February 2027)
+- **Repository access**: **Only select repositories** → this repository only
+- **Permissions** → **Add permissions** → **Actions** → **Read and write** (Metadata: Read-only is added automatically)
+
+Copy the `github_pat_…` token. It's shown only once. If it ever leaks, someone could only start or cancel
+runs of this repository's workflows: no access to code or other repositories.
+
+**b. Create the cron job.** Sign up at [cron-job.org](https://cron-job.org) → **Create cronjob**:
+- **URL**: `https://api.github.com/repos/YOUR_NAME/YOUR_REPO/actions/workflows/discord-rank.yml/dispatches`
+- **Execution schedule**: every 5 minutes
+- **Advanced** → **Request method** `POST`, **Request body** `{"ref":"main"}`, **Headers**:
+
+  | Key | Value |
+  |---|---|
+  | `Authorization` | `Bearer github_pat_…` (your token) |
+  | `Accept` | `application/vnd.github+json` |
+  | `X-GitHub-Api-Version` | `2022-11-28` |
+  | `Content-Type` | `application/json` |
+
+Click **Test run**: `204 No Content` means it worked and a new run appears in the **Actions** tab. Then save.
+Tip: enable **Schedule expires** so it stops after the ladder ends.
 
 ### Settings
 
@@ -57,12 +83,16 @@ From now on the message updates itself about every 5 minutes (GitHub may delay r
 
 - **Privacy**: secrets are encrypted, so the webhook URL and the streamer's name never appear in the repository.
   Action logs of a public repository are public, so the updater only logs a status line: never the name, rank or score.
-- **No spam**: scheduled runs never post a new message. Only a manual run creates one, and only when no message ID is set.
+- **No spam**: on GitHub, a new message is posted **only** when you tick **Post a new rank message** in a manual run.
+  Scheduled and cron-job.org runs only ever edit the existing message.
 - **Temporary problems**: if the official server or the translation file doesn't respond, the message is left as it is
   and the next run tries again. These count as warnings, not failures, so GitHub won't email you every 5 minutes.
-- **Failure emails?** If `overlay.html` in the overlay project changes in a way this updater can't read, runs fail and
-  GitHub emails you, because it won't fix itself. The channel message is left untouched until it's fixed.
-- **Deleted the message?** Run the workflow manually once, then replace `DISCORD_MESSAGE_ID` with the new ID.
+- **Failure emails?** If `overlay.html` in the overlay project is moved, deleted, or changed in a way this updater can't
+  read, runs fail and GitHub emails you, because it won't fix itself. The channel message is left untouched until it's fixed.
+  To pause everything, disable the job in cron-job.org.
+- **Deleted the message?** Updates pause (a warning shows in the Actions log; nothing is posted). Run the workflow
+  with **Post a new rank message** ticked, then replace `DISCORD_MESSAGE_ID` with the new ID.
+- **Deleted the webhook?** Runs fail and GitHub emails you. Create a new webhook and update `DISCORD_WEBHOOK_URL`.
 - **Inactive repositories**: GitHub pauses scheduled workflows in public repositories after 60 days without any commits.
   The ladder ends on January 10, 2027, so this normally doesn't matter.
 
@@ -92,7 +122,7 @@ and break this tool. Please don't make it run more often than every 5 minutes.
 在 Discord 頻道裡放**一則訊息**，固定顯示實況主在 **三角洲行動主播天梯賽 S2** 的即時排名：
 名次、地區排名、評分、和前後名的差距、擊殺、場次、帶出價值，內容跟 OBS overlay 一樣。
 
-每次都是編輯同一則訊息，不會洗版。由 GitHub Actions 免費大約每 5 分鐘自動執行，電腦不用開著。
+每次都是編輯同一則訊息，不會洗版。在 GitHub Actions 上免費執行，由 [cron-job.org](https://cron-job.org) 每 5 分鐘觸發一次，電腦不用開著。
 
 > 要找 OBS / Streamlabs 的 overlay？→ [deltaforce-ladder-overlay](https://github.com/derder2000/deltaforce-ladder-overlay)
 
@@ -108,7 +138,7 @@ and break this tool. Please don't make it run more often than every 5 minutes.
   更新 overlay 之後，這邊下一次執行就會自動跟上
 - ▲ / ▼ 顯示最近一次的名次變動
 - 「最後更新時間」會自動用每個人自己的時區顯示
-- 用 GitHub Actions 免費執行，不需要伺服器，電腦也不用開著
+- 用 GitHub Actions + cron-job.org 免費執行，不需要伺服器，電腦也不用開著
 
 ### 設定步驟
 
@@ -119,10 +149,36 @@ and break this tool. Please don't make it run more often than every 5 minutes.
 3. **加入設定**：你的專案 →「**Settings**」→「**Secrets and variables**」→「**Actions**」
    - 「**Secrets**」分頁 →「**New repository secret**」：新增 `DISCORD_WEBHOOK_URL`（剛剛複製的網址）和 `PLAYER`（實況主暱稱）
    - 「**Variables**」分頁（選填）：`LANGUAGE`，例如 `en`（預設 `zh-TW`）
-4. **建立訊息**：「**Actions**」分頁 →「**Discord rank**」→「**Run workflow**」。跑完後點進那次執行的紀錄，複製裡面印出的訊息 ID。
+4. **建立訊息**：「**Actions**」分頁 →「**Discord rank**」→「**Run workflow**」→ 勾選「**發一則新的排名訊息**」→「**Run workflow**」。
+   跑完後點進那次執行的紀錄，複製裡面印出的訊息 ID。
 5. **存下訊息 ID**：「**Variables**」分頁 →「**New repository variable**」→ `DISCORD_MESSAGE_ID` = 剛剛複製的 ID。
+6. **設定每 5 分鐘觸發**（見下方）。排程檔裡雖然也有 GitHub 的定時排程，但新專案的排程常常嚴重延遲甚至完全不跑，
+   用外部服務觸發才穩定。
 
-完成。之後訊息大約每 5 分鐘自動更新一次（GitHub 忙碌時可能會延遲）。
+#### 用 cron-job.org 每 5 分鐘觸發
+
+**a. 建立權限極小的 GitHub 權杖**：右上角頭像 →「**Settings**」→「**Developer settings**」→「**Personal access tokens**」
+→「**Fine-grained tokens**」→「**Generate new token**」：
+- **Expiration**：設在天梯賽結束後不久（例如 2027 年 2 月）
+- **Repository access**：「**Only select repositories**」→ 只選這個專案
+- **Permissions** →「**Add permissions**」→「**Actions**」→「**Read and write**」（Metadata: Read-only 會自動加上）
+
+複製 `github_pat_` 開頭的權杖，它只會顯示一次。萬一外流，別人最多只能啟動或取消這個專案的執行，碰不到程式碼和其他專案。
+
+**b. 建立定時工作**：到 [cron-job.org](https://cron-job.org) 註冊 →「**Create cronjob**」：
+- **URL**：`https://api.github.com/repos/你的帳號/你的專案/actions/workflows/discord-rank.yml/dispatches`
+- **Execution schedule**：每 5 分鐘
+- 「**Advanced**」→ **Request method** 選 `POST`，**Request body** 填 `{"ref":"main"}`，**Headers** 新增：
+
+  | Key | Value |
+  |---|---|
+  | `Authorization` | `Bearer github_pat_…`（你的權杖） |
+  | `Accept` | `application/vnd.github+json` |
+  | `X-GitHub-Api-Version` | `2022-11-28` |
+  | `Content-Type` | `application/json` |
+
+按「**Test run**」，出現 `204 No Content` 就代表成功，「Actions」分頁也會多一筆執行，然後存檔。
+小技巧：打開「**Schedule expires**」，天梯賽結束後就會自動停止。
 
 ### 設定項目
 
@@ -137,12 +193,15 @@ and break this tool. Please don't make it run more often than every 5 minutes.
 
 - **隱私**：Secrets 是加密保存的，Webhook 網址和實況主名字都不會出現在專案裡。
   公開專案的 Actions 紀錄任何人都看得到，所以程式只會印出狀態，不會印出名字、名次或分數。
-- **不會洗版**：定時執行永遠不會發新訊息，只有手動執行、而且還沒設定訊息 ID 時才會建立一則。
+- **不會洗版**：在 GitHub 上，**只有**手動執行並勾選「發一則新的排名訊息」才會發新訊息，
+  定時排程和 cron-job.org 觸發都只會編輯原本那則。
 - **暫時性問題**：官方伺服器或翻譯檔沒回應時，頻道訊息會維持原樣，下次自動再試。
   這種情況只算警告、不算失敗，GitHub 不會每 5 分鐘寄信給你。
-- **收到失敗通知信？** 代表 overlay 專案的 `overlay.html` 改成了這支程式讀不懂的格式。這種問題不會自己好，
-  所以會算失敗並寄信通知你；修好之前，頻道訊息會維持原樣。
-- **訊息被刪掉了？** 手動執行一次，再把 `DISCORD_MESSAGE_ID` 換成新的 ID。
+- **收到失敗通知信？** 代表 overlay 專案的 `overlay.html` 被搬走、刪掉，或改成了這支程式讀不懂的格式。這種問題不會自己好，
+  所以會算失敗並寄信通知你；修好之前，頻道訊息會維持原樣。想全部暫停的話，到 cron-job.org 停用那個工作。
+- **訊息被刪掉了？** 更新會暫停（Actions 紀錄裡會出現警告，但不會發任何訊息）。手動執行並勾選「發一則新的排名訊息」，
+  再把 `DISCORD_MESSAGE_ID` 換成新的 ID。
+- **Webhook 被刪掉了？** 執行會失敗，GitHub 會寄信通知你。重新建立 Webhook，再更新 `DISCORD_WEBHOOK_URL`。
 - **專案太久沒動**：公開專案超過 60 天沒有任何 commit，GitHub 會暫停定時執行。
   天梯賽在 2027 年 1 月 10 日結束，通常不會遇到。
 

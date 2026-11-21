@@ -10,7 +10,9 @@
 //    DISCORD_WEBHOOK_URL  必填，Discord 頻道的 Webhook 網址（機密！）/ required, keep secret
 //    PLAYER               必填，要追蹤的實況主暱稱或玩家 ID / required, nickname or player ID
 //    LANGUAGE             選填，預設 zh-TW（跟 overlay 一樣的 16 種語言）/ optional, default zh-TW
-//    DISCORD_MESSAGE_ID   選填，要編輯的訊息 ID；第一次執行會自動建立並印出 / optional
+//    DISCORD_MESSAGE_ID   要持續編輯的訊息 ID / the message to keep editing
+//    CREATE_MESSAGE       true = 發一則新的排名訊息（在 GitHub 上只有手動執行勾選時才會是 true）
+//                         true = post a new rank message (on GitHub only when ticked in a manual run)
 //
 //  翻譯、地區名稱、排名 API 的網址和參數，全部直接讀 overlay 專案的 overlay.html，只要維護那一份
 //  Translations, region names and the ranking API settings all come from the overlay repo's overlay.html
@@ -27,6 +29,7 @@ const WEBHOOK = (ENV.DISCORD_WEBHOOK_URL || '').trim();
 const PLAYER = (ENV.PLAYER || '').trim();
 const LANG_PREF = (ENV.LANGUAGE || 'zh-TW').trim();
 const IN_ACTIONS = ENV.GITHUB_ACTIONS === 'true';
+const CREATE = String(ENV.CREATE_MESSAGE || '').toLowerCase() === 'true';
 // 在自己電腦上跑時，訊息 ID 記在這個檔案（已加進 .gitignore）/ local runs remember the message ID here
 const ID_FILE = join(HERE, '.message-id');
 // 翻譯直接讀 OBS overlay 專案裡的 overlay.html，兩邊永遠同一份 / translations come from the overlay repo
@@ -56,6 +59,8 @@ async function loadOverlay() {
     const timer = setTimeout(() => ctrl.abort(), 20000);
     try {
       const res = await fetch(OVERLAY_SOURCE, { signal: ctrl.signal });
+      // 404 / 410 = 檔案被搬走、刪掉或專案改成私人，不會自己好 → 算失敗；其他錯誤（5xx…）當成暫時性的
+      if (res.status === 404 || res.status === 410) throw new FormatError(`找不到 ${OVERLAY_SOURCE}（HTTP ${res.status}），overlay 專案可能改名、搬移或改成私人`);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       src = await res.text();
     } finally { clearTimeout(timer); }
@@ -128,12 +133,12 @@ function webhookParts(url) {
   const api = ENV.DISCORD_API_BASE || 'https://discord.com/api';   // DISCORD_API_BASE 只在測試時使用 / test-only override
   return { id: m[1], token: m[2], base: `${api}/webhooks/${m[1]}/${m[2]}` };
 }
-async function discord(method, url, body) {
+async function discord(method, url, body, attempt = 1) {
   const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-  if (res.status === 429) {                    // 被限速就等一下再試一次
+  if (res.status === 429 && attempt < 3) {     // 被限速就等一下再試，最多 3 次
     const wait = Math.min(10, Number((await res.json().catch(() => ({}))).retry_after) || 2);
     await new Promise(r => setTimeout(r, wait * 1000));
-    return discord(method, url, body);
+    return discord(method, url, body, attempt + 1);
   }
   return res;
 }
@@ -221,7 +226,7 @@ async function main() {
   try { overlay = await loadOverlay(); }
   catch (e) {
     // 格式錯誤 → 失敗（GitHub 會寄信通知你去修）；連線問題 → 警告（下次自動再試）
-    if (e instanceof FormatError) return fail('overlay.html 的格式跟這支程式對不上，頻道訊息維持原樣，需要更新程式：' + e.message);
+    if (e instanceof FormatError) return fail('overlay.html 讀不到或格式對不上，頻道訊息維持原樣，需要處理：' + e.message);
     return warn('讀不到 overlay.html，頻道訊息維持原樣，下次再試：' + (e.name === 'AbortError' ? '連線逾時' : e.message));
   }
   const { I18N, REGION_NAMES } = overlay;
@@ -230,20 +235,33 @@ async function main() {
   let messageId = (ENV.DISCORD_MESSAGE_ID || '').trim();
   if (!messageId && !IN_ACTIONS && existsSync(ID_FILE)) messageId = readFileSync(ID_FILE, 'utf8').trim();
 
-  // 讀上一次的訊息，拿到上一次的名次（用來顯示 ▲▼）
-  // 在 GitHub 上定時執行、但還沒設定訊息 ID 時不要發新訊息，不然每次執行都會多一則（洗版）
-  if (!messageId && IN_ACTIONS && ENV.GITHUB_EVENT_NAME === 'schedule') {
-    log('還沒設定 DISCORD_MESSAGE_ID，定時執行先跳過。請先到 Actions 手動執行一次（Run workflow）建立訊息。');
-    log('DISCORD_MESSAGE_ID is not set yet; skipping scheduled run. Run the workflow manually once to create the message.');
-    return;
+  // 防洗版：在 GitHub 上，只有手動執行並勾選「建立新訊息」才會發新訊息，其他時候一律只編輯原本那則。
+  // cron-job.org 觸發時 GitHub 也會當成手動執行，但它不會勾選，所以永遠不會誤發。
+  // Anti-spam: on GitHub a new message is posted only when "create message" is ticked in a manual run.
+  if (CREATE) messageId = '';
+  else if (!messageId && IN_ACTIONS) {
+    return warn('還沒設定 DISCORD_MESSAGE_ID，這次跳過。第一次使用請到 Actions → Run workflow，勾選「建立新訊息」執行一次。');
   }
 
+  // 讀上一次的訊息，拿到上一次的名次（用來顯示 ▲▼）
   let prev = null;
   if (messageId) {
     const r = await discord('GET', `${hook.base}/messages/${messageId}`);
     if (r.ok) prev = readState(await r.json());
-    else if (r.status === 404) { log('找不到原本的訊息（可能被刪掉了），會重新建立一則。'); messageId = ''; }
-    else return fail('讀取 Discord 訊息失敗，HTTP ' + r.status + '（Webhook 網址可能已失效）');
+    else {
+      const code = (await r.json().catch(() => ({}))).code;
+      if (r.status === 404 && code === 10008) {          // 10008 = Unknown Message：訊息被刪掉了
+        if (IN_ACTIONS) {
+          // 不自動補發，不然 GitHub 上存的還是舊 ID，每次執行都會再補一則（洗版）
+          return warn('頻道裡找不到排名訊息（可能被刪掉了），這次跳過。到 Actions → Run workflow 勾選「建立新訊息」，再把新的訊息 ID 更新到 DISCORD_MESSAGE_ID。');
+        }
+        log('找不到原本的訊息（可能被刪掉了），會重新建立一則。'); messageId = '';   // 自己電腦上：新 ID 會自動存檔，不會洗版
+      } else if (r.status === 404 || r.status === 401) { // 10015 = Unknown Webhook：Webhook 被刪掉或網址錯誤
+        return fail('Webhook 已失效（可能在 Discord 被刪掉了），請重新建立 Webhook 並更新 DISCORD_WEBHOOK_URL。HTTP ' + r.status);
+      } else {
+        return fail('讀取 Discord 訊息失敗，HTTP ' + r.status);
+      }
+    }
   }
 
   let ladder;
@@ -266,7 +284,7 @@ async function main() {
     if (!IN_ACTIONS) writeFileSync(ID_FILE, msg.id);
     log('✓ 已在頻道建立排名訊息 / message created');
     log(`  訊息 ID / message ID: ${msg.id}`);
-    if (IN_ACTIONS) log('  ➜ 請到 GitHub 專案 Settings → Secrets and variables → Actions → Variables，新增 DISCORD_MESSAGE_ID =', msg.id);
+    if (IN_ACTIONS) log('  ➜ 請到 GitHub 專案 Settings → Secrets and variables → Actions → Variables，把 DISCORD_MESSAGE_ID 設成', msg.id);
   }
 }
 
